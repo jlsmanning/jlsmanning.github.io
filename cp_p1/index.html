@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Project 1: Aligning and compositing the images of the Prokudin-Gorskii photo collection</title>
+</head>
+<body style="background-color:LightGray">
+<h1>Project 1: Aligning and compositing the images of the Prokudin-Gorskii photo collection</h1>
+<h4>Justine Manning</h4>
+<h2>The problem</h2>
+<p>The challenge of this project was to take a file from the <a href="https://www.loc.gov/pictures/collection/prok/" target="_blank">Prokudin-Gorskii photo collection</a> and convert the plates in the image into a single color image. The basic procedure for doing this is to split the image file into thirds, superimpose these upon each other, and align them so that the composite forms a clear color image.</p>
+<figure>
+  <img src="results/00125v/00125v_orig.png">
+  <figcaption>An example of a raw image from the dataset</figcaption>
+</figure>
+<h2>Cropping the image borders</h2>
+<p>I decided to experiment with automatic border-cropping on the images. The reason for this is that the borders are black and white and contribute big chunks of meaningless high and low intensity values to the image. These could affect the error when it is computed in the alignment step resulting in a high error even when the real image values are being aligned correctly. The other reason to trim the borders is that it results in image channels that are many pixels closer to their correct alignment. In general, the procedure for cropping the borders involved preprocessing the image to make the border easier to find, iteratively locating the border, then cropping the border region from the image.</p>
+<h3>Cropping the outer white border</h3>
+<p>To crop the white border, I first created a copy of the image that would be processed to highlight the white border. To do this, I used a median blur to simplify the copy then converted it to black and white by thresholding at the midpoint. After this I used dilation to expand the white regions of the copy.</p>
+<figure>
+  <img src="results/00125v/00125v_prep_cropwhite.png">
+  <figcaption>How the image was preprocessed for cropping the white border</figcaption>
+</figure>
+<p>To find the top and bottom borders, I collapsed the copy into a single column array of the average pixel values for each row. I then iterated from the top and the bottom to find the locations where the averages stopped being "white," which I defined as a value greater than 229. I repeated this procedure to find the left and right borders, this time collapsing the copy into a row of averages.</p>
+<p>This process largely worked well, although some images were left with a few white pixels here and there where the border was not very straight. Defining the white region as being pixels 229 and greater helped somewhat in these situations. It also left the image data alone, because the black borders served as healthy barriers.</p>
+<figure>
+  <img src="results/00125v/00125v_after_cropwhite.png">
+  <figcaption>The image after cropping the white border</figcaption>
+</figure>
+<h3>Cropping the black borders</h3>
+<p>I separated cropping the black borders into two problems: cropping the outer border and cropping out the inner borders that separate the plates. The procedure I used for cropping the black outer border was similar to that for cropping the white border. However, the former problem is much more challenging because the black borders touch the real photo data, and so overeager cropping could chop off desired data.</p>
+<p>The preprocessing I used on an image copy for the outer border was eroding to enhance dark pixels then thresholding to convert the copy to black and white. In this case, I used a threshold of 60 to reduce the number of pixels that counted as black. The reason for this was to prevent dark sections of the image from looking like black borders. I used the same iterative method as in the white border cropping, with one difference: skipping over initial non-"black" areas to reach the "black" area. "Black" in this case was less permissive than the "white" designation: values of 0 to 51. This was necessary to prevent cropping the good image data. Since many of the black borders in the images were faded and gray, however, a few were missed. Adjusting the algorithm to catch these missed borders had the unfortunate effect of cropping out good image data in other images, so I left it biassed to avoid cropping borders.</p>
+<figure>
+  <img src="results/00125v/00125v_prep_cropblackouter.png">
+  <figcaption>How the image was preprocessed to crop the outer black border</figcaption>
+</figure>
+<figure>
+  <img src="results/00125v/00125v_after_cropblackouter.png">
+  <figcaption>The image after cropping the outer black border</figcaption>
+</figure>
+<p>Cropping out the interior black borders was much harder because they had good image data on both sides. For this reason, I had to be much more conservative about cropping. In creating a preprocessed copy, I used the same erosion and thresholding as for the outer black border, but I defined the "black" regions as 0 to 19. Like in the other cropping methods, I iteratively worked my way across a column of average values in the image to identify the boundaries. After cropping out the borders, I was ready to align the plates and make a color image.</p>
+<figure>
+  <img src="results/00125v/00125v_prep_cropblackinner.png">
+  <figcaption>How the image was preprocessed to crop the inner black borders</figcaption>
+</figure>
+<figure>
+  <img src="results/00125v/00125v_after_cropblackinner.png">
+  <figcaption>The image after cropping the inner black borders</figcaption>
+</figure>
+<h2>Aligning the image channels</h2>
+<p>To align the plates, I first divided the image into thirds, with the top, middle, and bottom plates forming the blue, green, and red channels respectively. I created copies of these channels so that I could preprocess them for alignment. The preprocessing was comprised of min/max normalizing, median blurring, and then edge detection. I tried a couple of different edge detection methods, and what worked best was horizontal and vertical Sobel gradients.</p>
+<figure>
+  <img src="results/00125v/00125v_channels_edges.png">
+  <figcaption>How the channels were preprocessed for alignment</figcaption>
+</figure>
+<p>I then aligned the preprocessed copied channels to each other, first red aligned to green, then blue aligned to green. For the alignment procedure, I used an image pyramid recursively so that images larger than 400px did not have to be exhaustively searched for displacements across a necessarily wide range. Instead, the image scaled in half is searched across displacement of (-20, 20) in the x and y directions, and then the best displacement is returned as the center of the next higher level of displacement search. This was still a bit slow for the larger images, but certainly not as slow as it might have been.</p>
+<figure>
+  <img src="results/00125v/00125v_before_align.png">
+  <figcaption>The composite image before the alignment procedure</figcaption>
+</figure>
+<figure>
+  <img src="results/00125v/00125v_aligned.png">
+  <figcaption>The composite image after alignment</figcaption>
+</figure>
+<p>As my error function, I used sum-squared-difference. This worked very well with the edge-detection preprocessing because the gradient of each channel is not going to differ as much as the absolute intensity values. To account for border remnants and some of the damage or degradation to the plates around the edges, in obtaining the error, I used only the center 80% of the channels. After the best alignments were located, I merged the three channels into a single BGR color image. Using the stored optimal displacements, I used the absolute max of the displacements for x and y to crop the composite image removing stripes created by the displacements.</p>
+<figure>
+  <img src="results/00125v/00125v_cropaligned.png">
+  <figcaption>The aligned image with displacement stripes cropped</figcaption>
+</figure>
+<h2>Final enhancements</h2>
+<p>In finding an algorithmic means to improve image quality, a challenge was that many of the image had different deficiences. For example, one might be too yellow while another is too blue. What I settled on was decreasing gamma, as many images seemed overexposed, histogram equalization, and increasing contrast slightly. For the large images, this worked well, but for some of the smaller images equalization worsened jpeg artifacts or exacerbated color imbalances.</p>
+<figure>
+  <img src="results/00125v/00125v_gamma.png">
+  <figcaption>The aligned image with gamma adjusted</figcaption>
+</figure>
+<figure>
+  <img src="results/00125v/00125v_equalize.png">
+  <figcaption>The equalized aligned image (the colors look intense, but weird artifacts appear)</figcaption>
+</figure>
+<figure>
+  <img src="results/00125v/00125v_contrast.png">
+  <figcaption>The aligned image with contrast adjusted</figcaption>
+</figure>
+(huge image following)
+<figure>
+  <img src="results/01861a/01861a_final.png">
+  <figcaption>A large image where a couple borders were missed but the equalization worked out</figcaption>
+</figure>
+<h2>All results</h2>
+(images are full-size)<br>
+<a href="results/01598v/index.html" target="_blank">01598v</a><br>
+<a href="results/00804v/index.html" target="_blank">00804v</a><br>
+<a href="results/31421v/index.html" target="_blank">31421v</a><br>
+<a href="results/10131v/index.html" target="_blank">10131v</a><br>
+<a href="results/00163v/index.html" target="_blank">00163v</a><br>
+<a href="results/00125v/index.html" target="_blank">00125v</a><br>
+<a href="results/01007a/index.html" target="_blank">01007a</a><br>
+<a href="results/01725u/index.html" target="_blank">01725u</a><br>
+<a href="results/01728v/index.html" target="_blank">01728v</a><br>
+<a href="results/01269v/index.html" target="_blank">01269v</a><br>
+<a href="results/01861a/index.html" target="_blank">01861a</a><br>
+<a href="results/00056v/index.html" target="_blank">00056v</a><br>
+<a href="results/01047u/index.html" target="_blank">01047u</a><br>
+<a href="results/01164v/index.html" target="_blank">01164v</a><br>
+<a href="results/00458u/index.html" target="_blank">00458u</a><br>
+<a href="results/01597v/index.html" target="_blank">01597v</a><br>
+<a href="results/01522v/index.html" target="_blank">01522v</a><br>
+<br>
+<a href="align_code.zip">code</a>
+
+
+</body>
+</html>
